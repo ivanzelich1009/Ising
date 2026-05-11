@@ -14,25 +14,28 @@ from torch.utils.data import (
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
 N = 32
 SEQ_LEN = N * N
 
 BATCH_SIZE = 64
 
-EMBED_DIM = 256
-NUM_HEADS = 8
-NUM_LAYERS = 6
+EMBED_DIM = 128
+NUM_HEADS = 4
+NUM_LAYERS = 4
 DROPOUT = 0.1
 
 LR = 3e-4
 EPOCHS = 20
 
-NUM_TOTAL_SAMPLES = 12000
+NUM_TOTAL_SAMPLES = 50000
 
 TRAIN_FRAC = 0.8
 
 BURN_IN = 5000
-DECORRELATION_STEPS = 10
+DECORRELATION_STEPS = 25
 
 beta_c = 0.5 * np.log(1 + np.sqrt(2))
 
@@ -158,7 +161,7 @@ class IsingDataset(Dataset):
 
 class FourierPositionalEncoding2D(nn.Module):
 
-    def __init__(self, d_model, N, num_frequencies=8):
+    def __init__(self, d_model, N, num_frequencies=16):
 
         super().__init__()
 
@@ -420,12 +423,19 @@ def sample_transformer(model, num_samples):
 
     for t in generation_bar:
 
-        logits = model(samples)
+        prefix = samples[:, :t+1]
 
-        probs = F.softmax(
-            logits[:, t],
-            dim=-1
-        )
+        with torch.autocast(
+            device_type="cuda",
+            dtype=torch.float16
+        ):
+
+            logits = model(prefix)
+
+            probs = F.softmax(
+                logits[:, -1],
+                dim=-1
+            )
 
         next_spin = torch.multinomial(
             probs,
