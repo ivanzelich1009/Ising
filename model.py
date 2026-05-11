@@ -254,7 +254,6 @@ class IsingTransformer(nn.Module):
         self.position_encoding = FourierPositionalEncoding2D(
             d_model=embed_dim,
             N=N,
-            num_frequencies=embed_dim // 4
         )
 
         encoder_layer = nn.TransformerEncoderLayer(
