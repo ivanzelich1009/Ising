@@ -139,8 +139,10 @@ class IsingDataset(Dataset):
     def __getitem__(self, idx):
 
         x = self.samples[idx]
+        
+        BOS_TOKEN = 2 # Special token for beginning of sequence
 
-        bos = torch.zeros(1, dtype=torch.long)
+        bos = torch.full((1,), BOS_TOKEN, dtype=torch.long)
 
         inp = torch.cat([bos, x[:-1]], dim=0)
 
@@ -247,7 +249,7 @@ class IsingTransformer(nn.Module):
         super().__init__()
 
         self.token_embedding = nn.Embedding(
-            2,
+            3,
             embed_dim
         )
 
