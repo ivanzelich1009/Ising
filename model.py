@@ -234,6 +234,7 @@ class IsingTransformer(nn.Module):
 
     def __init__(
         self,
+        N,
         embed_dim,
         num_heads,
         num_layers,
@@ -248,7 +249,7 @@ class IsingTransformer(nn.Module):
         )
 
         self.position_encoding = FourierPositionalEncoding2D(
-            embed_dim=embed_dim,
+            d_model=embed_dim,
             N=N,
             num_frequencies=embed_dim // 4
         )
@@ -616,7 +617,7 @@ if __name__ == "__main__":
     )
 
     model = IsingTransformer(
-        seq_len=SEQ_LEN,
+        N=N,
         embed_dim=EMBED_DIM,
         num_heads=NUM_HEADS,
         num_layers=NUM_LAYERS,
