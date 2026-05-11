@@ -1,18 +1,3 @@
-# ============================================================
-# Complete Ising Transformer Project
-# ============================================================
-#
-# Features:
-#
-#   1. Wolff sampler for Ising data generation
-#   2. Proper TRAIN / TEST split
-#   3. GPT-style autoregressive transformer
-#   4. tqdm progress bars
-#   5. Clear train/eval logging
-#   6. Physical evaluation metrics
-#
-# ============================================================
-
 import math
 import numpy as np
 from tqdm import tqdm
@@ -26,11 +11,6 @@ from torch.utils.data import (
     DataLoader,
     random_split
 )
-
-
-# ============================================================
-# Hyperparameters
-# ============================================================
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -61,9 +41,7 @@ print("DEVICE:", DEVICE)
 print("=" * 60)
 
 
-# ============================================================
-# Wolff Sampler
-# ============================================================
+#Wolff cluster update algorithm for 2D Ising model
 
 def wolff_update(spins, beta):
 
@@ -107,9 +85,7 @@ def wolff_update(spins, beta):
     return spins
 
 
-# ============================================================
-# Generate Ising Dataset
-# ============================================================
+# Dataset generation using Wolff algorithm to sample from the critical 2D Ising model distribution
 
 def generate_ising_dataset(num_samples):
 
@@ -141,22 +117,15 @@ def generate_ising_dataset(num_samples):
 
     return samples
 
-
-# ============================================================
-# Dataset
-# ============================================================
-
 class IsingDataset(Dataset):
 
     def __init__(self, samples):
 
         samples = samples.reshape(samples.shape[0], -1)
 
-        # map:
-        #
         # -1 -> 0
         # +1 -> 1
-        #
+
         samples = ((samples + 1) // 2).astype(np.int64)
 
         self.samples = torch.tensor(samples)
@@ -177,44 +146,94 @@ class IsingDataset(Dataset):
         return inp, target
 
 
-# ============================================================
-# Positional Encoding
-# ============================================================
+'''Positional Encoding for Transformer
 
-class PositionalEncoding(nn.Module):
+        We build Fourier modes on the discrete torus:
+        cos(2π kx x / N)
+        sin(2π kx x / N)
+        cos(2π ky y / N)
+        sin(2π ky y / N) 
+        for multiple frequencies k.
+        This allows the model to learn spatial patterns and correlations in the 2D lattice.'''
 
-    def __init__(self, d_model, max_len):
+class FourierPositionalEncoding2D(nn.Module):
+
+    def __init__(self, d_model, N, num_frequencies=8):
 
         super().__init__()
 
-        pe = torch.zeros(max_len, d_model)
+        self.N = N
+        self.d_model = d_model
 
-        position = torch.arange(0, max_len).unsqueeze(1)
+        pe = torch.zeros(N, N, d_model)
 
-        div_term = torch.exp(
-            torch.arange(0, d_model, 2)
-            * (-math.log(10000.0) / d_model)
+        frequencies = torch.arange(
+            1,
+            num_frequencies + 1
         )
 
-        pe[:, 0::2] = torch.sin(position * div_term)
-        pe[:, 1::2] = torch.cos(position * div_term)
+        for x in range(N):
+            for y in range(N):
 
-        self.register_buffer("pe", pe.unsqueeze(0))
+                features = []
+
+                for k in frequencies:
+
+                    features.append(
+                        math.cos(2 * math.pi * k * x / N)
+                    )
+
+                    features.append(
+                        math.sin(2 * math.pi * k * x / N)
+                    )
+
+                    features.append(
+                        math.cos(2 * math.pi * k * y / N)
+                    )
+
+                    features.append(
+                        math.sin(2 * math.pi * k * y / N)
+                    )
+
+                features = torch.tensor(features)
+
+                if len(features) < d_model:
+
+                    padding = torch.zeros(
+                        d_model - len(features)
+                    )
+
+                    features = torch.cat([
+                        features,
+                        padding
+                    ])
+
+                else:
+
+                    features = features[:d_model]
+
+                pe[x, y] = features
+
+        # Flatten:
+
+        pe = pe.reshape(N * N, d_model)
+
+        self.register_buffer(
+            "pe",
+            pe.unsqueeze(0)
+        )
 
     def forward(self, x):
 
         return x + self.pe[:, :x.size(1)]
 
 
-# ============================================================
-# Transformer
-# ============================================================
+# Transformer-based autoregressive model for 2D Ising configurations
 
 class IsingTransformer(nn.Module):
 
     def __init__(
         self,
-        seq_len,
         embed_dim,
         num_heads,
         num_layers,
@@ -228,9 +247,10 @@ class IsingTransformer(nn.Module):
             embed_dim
         )
 
-        self.position_encoding = PositionalEncoding(
-            embed_dim,
-            seq_len
+        self.position_encoding = FourierPositionalEncoding2D(
+            embed_dim=embed_dim,
+            N=N,
+            num_frequencies=embed_dim // 4
         )
 
         encoder_layer = nn.TransformerEncoderLayer(
@@ -284,9 +304,7 @@ class IsingTransformer(nn.Module):
         return logits
 
 
-# ============================================================
-# Training
-# ============================================================
+# Main training loop with evaluation on held-out test set after each epoch
 
 def train_model(model, train_loader, test_loader):
 
@@ -301,9 +319,7 @@ def train_model(model, train_loader, test_loader):
 
     for epoch in range(EPOCHS):
 
-        # ----------------------------------------------------
-        # TRAIN
-        # ----------------------------------------------------
+        # Train
 
         model.train()
 
@@ -340,9 +356,7 @@ def train_model(model, train_loader, test_loader):
 
         avg_train_loss = train_loss / len(train_loader)
 
-        # ----------------------------------------------------
-        # EVALUATION
-        # ----------------------------------------------------
+        # Evaluation
 
         model.eval()
 
@@ -382,11 +396,6 @@ def train_model(model, train_loader, test_loader):
         print(f"Train Loss: {avg_train_loss:.6f}")
         print(f"Test  Loss: {avg_test_loss:.6f}")
         print("-" * 60)
-
-
-# ============================================================
-# Sampling
-# ============================================================
 
 @torch.no_grad()
 def sample_transformer(model, num_samples):
@@ -439,10 +448,7 @@ def sample_transformer(model, num_samples):
 
     return samples.cpu().numpy()
 
-
-# ============================================================
-# Physics Observables
-# ============================================================
+# Physics observables used for evaluation
 
 def energy(config):
 
@@ -493,19 +499,13 @@ def correlation_function(configs, r_max=10):
     return np.array(corrs)
 
 
-# ============================================================
-# Evaluation Metrics
-# ============================================================
+# Evaluation
 
 def evaluate(real_samples, generated_samples):
 
     print("\n" + "=" * 60)
     print("FINAL PHYSICS EVALUATION")
     print("=" * 60)
-
-    # --------------------------------------------------------
-    # Energy
-    # --------------------------------------------------------
 
     real_E = np.array([
         energy(x)
@@ -519,10 +519,6 @@ def evaluate(real_samples, generated_samples):
                       desc="Computing Generated Energies")
     ])
 
-    # --------------------------------------------------------
-    # Magnetization
-    # --------------------------------------------------------
-
     real_M = np.array([
         magnetization(x)
         for x in real_samples
@@ -532,10 +528,6 @@ def evaluate(real_samples, generated_samples):
         magnetization(x)
         for x in generated_samples
     ])
-
-    # --------------------------------------------------------
-    # Correlations
-    # --------------------------------------------------------
 
     real_corr = correlation_function(real_samples)
 
@@ -547,10 +539,6 @@ def evaluate(real_samples, generated_samples):
             - np.log(np.abs(gen_corr) + 1e-8)
         )
     )
-
-    # --------------------------------------------------------
-    # Print Results
-    # --------------------------------------------------------
 
     print("\nEnergy Statistics")
     print("-" * 40)
@@ -588,24 +576,12 @@ def evaluate(real_samples, generated_samples):
     print("\nMean log-correlation error:")
     print(corr_error)
 
-
-# ============================================================
-# Main
-# ============================================================
-
 if __name__ == "__main__":
 
-    # --------------------------------------------------------
-    # Generate Dataset
-    # --------------------------------------------------------
 
     samples = generate_ising_dataset(
         NUM_TOTAL_SAMPLES
     )
-
-    # --------------------------------------------------------
-    # Dataset
-    # --------------------------------------------------------
 
     full_dataset = IsingDataset(samples)
 
@@ -627,10 +603,6 @@ if __name__ == "__main__":
     print("Train samples:", len(train_dataset))
     print("Test  samples:", len(test_dataset))
 
-    # --------------------------------------------------------
-    # DataLoaders
-    # --------------------------------------------------------
-
     train_loader = DataLoader(
         train_dataset,
         batch_size=BATCH_SIZE,
@@ -643,10 +615,6 @@ if __name__ == "__main__":
         shuffle=False
     )
 
-    # --------------------------------------------------------
-    # Model
-    # --------------------------------------------------------
-
     model = IsingTransformer(
         seq_len=SEQ_LEN,
         embed_dim=EMBED_DIM,
@@ -655,9 +623,6 @@ if __name__ == "__main__":
         dropout=DROPOUT
     ).to(DEVICE)
 
-    # --------------------------------------------------------
-    # Train
-    # --------------------------------------------------------
 
     train_model(
         model,
@@ -665,20 +630,13 @@ if __name__ == "__main__":
         test_loader
     )
 
-    # --------------------------------------------------------
-    # Generate NEW samples
-    # --------------------------------------------------------
 
     generated_samples = sample_transformer(
         model,
         num_samples=1000
     )
 
-    # --------------------------------------------------------
-    # Evaluate ONLY on held-out test data
-    # --------------------------------------------------------
-
-    print("\nPreparing held-out TEST samples...")
+    print("\nPreparing held-out test samples...")
 
     heldout_test_samples = []
 
